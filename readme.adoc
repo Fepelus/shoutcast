@@ -1,0 +1,19 @@
+= Shoutcast
+
+A shoutcast server that plays everything in a directory.
+
+== Why?
+
+This code runs on a Raspberry Pi that is sitting in my cupboard at home.
+I have a USB drive plugged into the pi where there is a tree of directories
+where each leaf directory is a complete album with names sorted in running
+order. This server is given a list of directory names from which it selects
+one directory and plays the contents _in order_. This means that when I play
+my internet radio from my phone I am forced to listen to the entire album
+and cannot skip forward or back.
+
+== Why?
+
+There is a delightful timelessness and lightness to having to hear the whole
+album that appeals to me. It almost certainly does not appeal to you. Plus,
+I got to write a shoutcast server in Zig.

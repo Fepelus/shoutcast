@@ -1,0 +1,7 @@
+main
+shoutcast
+build.zig.zon
+*.o
+zig-cache/
+.zig-cache/
+res/*mp3
