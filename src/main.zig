@@ -3,52 +3,64 @@
 //! the directory sending the data to the Connection (which itself knows
 //! the Protocol that should be on the wire)
 const srvr = @import("server.zig");
+const prot = @import("protocol.zig");
 const dir = @import("directory.zig");
 const cfg = @import("config.zig");
 const supply = @import("dir_supply.zig");
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const buffer_size = 64 * 1024; // bytes
 
 pub fn main() !void {
     var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = general_purpose_allocator.allocator();
+    const gpa = general_purpose_allocator.allocator();
+    defer _ = general_purpose_allocator.deinit();
+
     var thread_pool: std.Thread.Pool = undefined;
     try thread_pool.init(std.Thread.Pool.Options{
-        .allocator = allocator,
+        .allocator = gpa,
         .n_jobs = 2
     });
     defer thread_pool.deinit();
 
-    const config = try cfg.Config.init(allocator);
-    defer config.destroy();
-    var server = try srvr.Server.init(allocator, "0.0.0.0", config.port);
-    defer server.destroy();
+    const config = try cfg.Config.init(gpa);
+    defer config.deinit();
+    var server = try srvr.Server.init(gpa, "0.0.0.0", config.port);
+    defer server.close();
     try server.listen();
     while (true) {
-        try thread_pool.spawn(safe_handle_connection, .{allocator, server, config});
+        const protocol = try server.accept();
+        try thread_pool.spawn(safeHandleConnection, .{gpa, protocol, config});
     }
 }
 
-fn safe_handle_connection(allocator: Allocator, server: srvr.Server, config: cfg.Config) void {
-    handle_connection(allocator, server, config) catch |err| {
-        std.log.err("Error: {}\n", .{err});
-    };
+fn safeHandleConnection(allocator: Allocator, protocol: prot.Protocol, config: cfg.Config) void {
+    defer protocol.deinit();
+    handleConnection(allocator, protocol, config) catch |err|
+        switch (err) {
+            error.OutOfMemory =>  std.debug.panic("OUT OF MEMORY\n", .{}),
+            else => std.debug.print("Error: {}\n", .{err}), // otherwise don't panic — merely end this thread
+        };
 }
-fn handle_connection(allocator: Allocator, server: srvr.Server, config: cfg.Config) !void {
-    var connection = try server.accept();
-    defer connection.destroy();
+fn handleConnection(gpa: Allocator, in_protocol: prot.Protocol, config: cfg.Config) !void {
+    const buffer = try gpa.alloc(u8, buffer_size);
+    defer gpa.free(buffer);
+    var fixed_buffer_allocator = std.heap.FixedBufferAllocator.init(buffer);
+    const allocator = fixed_buffer_allocator.allocator();
 
-    try connection.ignoreReadFromClient();
-    try connection.sendPreamble();
+    var protocol = in_protocol;
 
-    var dir_supply  = supply.DirectorySupply.init(allocator, config);
-    while (dir_supply.has_next()) {
-        var directory = try dir_supply.next();
-        defer directory.destroy();
-        while (try directory.next()) | mp3_file| {
-            defer mp3_file.destroy();
-            try connection.send(mp3_file.trackinfo(), mp3_file.bytes());
+    if (!try protocol.isOKHeaderFromClient()) return;
+    try protocol.sendPreamble();
+
+    var dir_supply = supply.DirectorySupply.init(allocator, config);
+    while (try dir_supply.next()) |in_directory| {
+        var directory = in_directory;
+        defer directory.deinit();
+        while (try directory.next()) |mp3_file| {
+            defer mp3_file.deinit();
+            try protocol.sendFile(mp3_file);
         }
     }
 }

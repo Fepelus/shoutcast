@@ -7,9 +7,6 @@ const Allocator = std.mem.Allocator;
 
 pub const Config = struct {
     allocator: Allocator,
-    /// This is included in the metadata that is streamed after each MP3 block.
-    /// Doesn't seem to be important in any way whatsoever
-    url: []u8,
     /// The port that this server will bind to
     port: u16,
     /// If true then this server will play each album specified once one after
@@ -21,23 +18,18 @@ pub const Config = struct {
 
     pub fn init(allocator: Allocator) !Config {
 
-        const config_path =  get_from_environment_variable(allocator, "SHOUTCAST_CONFIGFILE")
-            catch  try get_from_home_dir(allocator, "/.config/shoutcast/shoutcast.cfg");
+        const config_path =  getFromEnvironmentVariable(allocator, "SHOUTCAST_CONFIGFILE")
+            catch  try getFromHomeDirectory(allocator, "/.config/shoutcast/shoutcast.cfg");
         defer allocator.free(config_path);
 
         var albums = std.ArrayList([]const u8).init(allocator);
-        var url: []u8 = undefined;
         var port: u16 = 8888;
         var inorder = false;
 
-        const file = std.fs.cwd().openFile(config_path, .{ .mode = .read_only })
-        catch {
-            std.debug.print("Could not open file {s}\n", .{config_path});
-            std.process.exit(1);
-        };
+        const file = try std.fs.cwd().openFile(config_path, .{ .mode = .read_only });
         defer file.close();
 
-        const content = try file.readToEndAlloc(allocator, 1_204 * 1_204);
+        const content = try file.readToEndAlloc(allocator, 512 * 1_204);
         defer allocator.free(content);
 
         var it = std.mem.split(u8, content, "\n");
@@ -47,10 +39,7 @@ pub const Config = struct {
                 const key = key_it.next() orelse continue;
                 const value = key_it.next() orelse continue;
 
-                if (std.mem.eql(u8, key, "url")) {
-                    url = try allocator.alloc(u8, value.len);
-                    @memcpy(url, value);
-                } else if (std.mem.eql(u8, key, "port")) {
+                if (std.mem.eql(u8, key, "port")) {
                     port = std.fmt.parseInt(u16, value, 10) catch |err| {
                         std.debug.print("Error parsing port: {}\n", .{err});
                         return err;
@@ -67,27 +56,25 @@ pub const Config = struct {
 
       return Config{
            .allocator = allocator,
-           .url = url,
            .port = port,
            .inorder = inorder,
            .albums = try albums.toOwnedSlice(),
         };
     }
 
-    pub fn destroy(self: Config) void {
+    pub fn deinit(self: Config) void {
         for (self.albums) |album| {
             self.allocator.free(album);
         }
         self.allocator.free(self.albums);
-        self.allocator.free(self.url);
     }
 };
 
-fn get_from_environment_variable(allocator: Allocator, env_name: []const u8) ![]u8 {
+fn getFromEnvironmentVariable(allocator: Allocator, env_name: []const u8) ![]u8 {
     return try std.process.getEnvVarOwned(allocator, env_name);
 }
 
-fn get_from_home_dir(allocator: Allocator, file_name: []const u8) ![]u8 {
+fn getFromHomeDirectory(allocator: Allocator, file_name: []const u8) ![]u8 {
     const home_dir = try std.process.getEnvVarOwned(allocator, "HOME");
     defer allocator.free(home_dir);
     const buffer = try allocator.alloc(u8, home_dir.len + file_name.len);

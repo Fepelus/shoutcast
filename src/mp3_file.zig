@@ -5,37 +5,28 @@ const id3 = @import("mp3id3.zig");
 const Allocator = std.mem.Allocator;
 
 pub const Mp3File = struct {
-    memory: []u8,
-    trackInfo: []u8,
     allocator: Allocator,
+    file: std.fs.File,
+    trackInfo: []u8,
 
-    pub fn init(allocator: Allocator, filename: []const u8) !Mp3File {
+    pub fn init(parent_allocator: Allocator, filename: []const u8) !Mp3File {
         std.debug.print("Loading: {s}\n", .{filename});
-        var file = try std.fs.cwd().openFile(filename, .{ .mode = .read_only});
-        defer file.close();
 
-        const file_size: u64 = (try file.stat()).size;
-        const buffer = try allocator.alloc(u8, @intCast(file_size));
-        try file.reader().readNoEof(buffer);
+        const file = try std.fs.cwd().openFile(filename, .{ .mode = .read_only});
+        errdefer file.close();
+
+        const trckinf = try id3.getTrackinfo(parent_allocator, file, filename);
 
         return Mp3File{
-            .memory = buffer,
-            .allocator = allocator,
-            .trackInfo = try id3.get_trackinfo(allocator, buffer)
+            .allocator = parent_allocator,
+            .file = file,
+            .trackInfo = trckinf
         };
     }
 
-    pub fn trackinfo(self: Mp3File) []u8 {
-        return self.trackInfo;
-    }
-
-    pub fn bytes(self: Mp3File) []u8 {
-        return self.memory;
-    }
-
-    pub fn destroy(self: Mp3File) void {
+    pub fn deinit(self: Mp3File) void {
+       self.file.close();
        self.allocator.free(self.trackInfo);
-       self.allocator.free(self.memory);
     }
 
 };

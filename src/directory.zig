@@ -11,20 +11,28 @@ pub const Directory = struct {
     index: u8,
 
     pub fn init(allocator: std.mem.Allocator, dirname: []const u8) !Directory {
-        const dir = try std.fs.cwd().openDir(
+        var dir = try std.fs.cwd().openDir(
             dirname,
             .{ .iterate = true },
         );
-        var iterator = dir.iterate();
+        errdefer dir.close();
+
         var files = std.ArrayList([]const u8).init(allocator);
+        errdefer {
+            for (files.items) |f| allocator.free(f);
+            files.deinit();
+        }
+
+        var iterator = dir.iterate();
         while (try iterator.next()) |entry| {
             if (entry.kind == .file and endsInMp3(entry.name)) {
-                const namecopy = try allocator.alloc(u8, entry.name.len);
-                @memcpy(namecopy, entry.name);
+                const namecopy = try allocator.dupe(u8, entry.name);
                 try files.append(namecopy);
             }
         }
+
         sortStringSlice(files.items);
+
         return Directory{
             .allocator = allocator,
             .dir = dir,
@@ -45,11 +53,12 @@ pub const Directory = struct {
         return try mp3f.Mp3File.init(self.allocator,fullFilename);
     }
 
-    pub fn destroy(self: Directory) void {
+    pub fn deinit(self: *Directory) void {
         for (self.files) |filename| {
             self.allocator.free(filename);
         }
         self.allocator.free(self.files);
+        self.dir.close();
     }
 
 };

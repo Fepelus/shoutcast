@@ -16,15 +16,12 @@ pub const DirectorySupply = struct {
       return DirectorySupply{
           .allocator = allocator,
           .config = config,
-          .index = 0, // of config.albums that should play _next_
+          .index = 0,
         };
     }
 
-    pub fn has_next(self: DirectorySupply) bool {
-       return !self.config.inorder or self.index < self.config.albums.len;
-    }
-
-    pub fn next(self: *DirectorySupply) !dir.Directory {
+    pub fn next(self: *DirectorySupply) !?dir.Directory {
+        if (self.config.inorder and self.config.albums.len <= self.index) return null;
         if (self.config.inorder) {
             self.index += 1;
             return try dir.Directory.init(self.allocator, self.config.albums[self.index - 1]);

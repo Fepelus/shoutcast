@@ -34,11 +34,10 @@ pub const Server = struct {
         var client_address_len: posix.socklen_t = @sizeOf(std.net.Address);
         const socket = try posix.accept(self.listener, &client_address.any, &client_address_len, 0);
 
-        std.debug.print("{} connected\n", .{client_address});
-        return scc.Protocol.init(self.allocator, socket);
+        return try scc.Protocol.init(self.allocator, socket);
     }
 
-    pub fn destroy(self: Server) void {
+    pub fn close(self: Server) void {
         posix.close(self.listener);
     }
 };
