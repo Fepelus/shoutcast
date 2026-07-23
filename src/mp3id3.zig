@@ -8,14 +8,12 @@ const Allocator = std.mem.Allocator;
 const tag_limit = 64 * 1024;
 
 
-pub fn getTrackinfo(allocator: Allocator, file: std.fs.File, filename: []const u8) ![]u8 {
-    defer(file.seekTo(0) catch unreachable);
-
-    if (try attemptId3v2(allocator, file)) |found_id3v2| {
+pub fn getTrackinfo(allocator: Allocator, io: std.Io, file: std.Io.File, filename: []const u8) ![]u8 {
+    if (try attemptId3v2(allocator, io, file)) |found_id3v2| {
         return found_id3v2;
     }
 
-    if (try attemptId3v1(allocator, file)) |found_id3v1| {
+    if (try attemptId3v1(allocator, io, file)) |found_id3v1| {
         return found_id3v1;
     }
 
@@ -25,14 +23,14 @@ pub fn getTrackinfo(allocator: Allocator, file: std.fs.File, filename: []const u
     return allocator.dupe(u8, iterator.first());
 }
 
-fn attemptId3v2(allocator: Allocator, file: std.fs.File) !?[]u8 {
+fn attemptId3v2(allocator: Allocator, io: std.Io, file: std.Io.File) !?[]u8 {
     var arena_allocator = std.heap.ArenaAllocator.init(allocator);
     defer arena_allocator.deinit();
 
     const arena = arena_allocator.allocator();
 
     var header_buf: [14]u8 = undefined;
-    const bytes_read = try file.pread(&header_buf, 0);
+    const bytes_read = try file.readPositionalAll(io, &header_buf, 0);
     if (bytes_read < 14)  return null;
     if (!isID3(header_buf[0..], 0) or header_buf[3] != 3)  return null;
 
@@ -58,7 +56,7 @@ fn attemptId3v2(allocator: Allocator, file: std.fs.File) !?[]u8 {
     }
 
     while (pos + 10 <= tag_end) {
-        const frame_header_read = try file.pread(&frame_header, pos);
+        const frame_header_read = try file.readPositionalAll(io, &frame_header, pos);
         if (frame_header_read < 10) break;
         if (frame_header[0] == 0) break;
 
@@ -80,7 +78,7 @@ fn attemptId3v2(allocator: Allocator, file: std.fs.File) !?[]u8 {
             }
 
             // frame_buf starts _after_ the frame_header
-            const content_read = try file.pread(frame_buf[0..frame_size], pos + 10);
+            const content_read = try file.readPositionalAll(io, frame_buf[0..frame_size], pos + 10);
             if (content_read < frame_size) break;
 
             const text_start = indexOfText(frame_buf[0..]);
@@ -135,12 +133,12 @@ fn indexOfText(input: []u8) usize {
     }
 }
 
-fn attemptId3v1(allocator: Allocator, file: std.fs.File) !?[]u8 {
+fn attemptId3v1(allocator: Allocator, io: std.Io, file: std.Io.File) !?[]u8 {
     const buffer = try allocator.alloc(u8, 128);
     defer allocator.free(buffer);
 
-    const file_size: u64 = (try file.stat()).size;
-    _ = try file.pread(buffer, file_size - 128);
+    const file_size: u64 = (try file.stat(io)).size;
+    _ = try file.readPositionalAll(io, buffer, file_size - 128);
 
     if (!isTAG(buffer, 0)) {
         return null;

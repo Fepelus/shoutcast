@@ -6,25 +6,27 @@ const mp3f = @import("mp3_file.zig");
 
 pub const Directory = struct {
     allocator: std.mem.Allocator,
-    dir: std.fs.Dir,
+    io: std.Io,
+    dir: std.Io.Dir,
     files: [][]const u8,
     index: u8,
 
-    pub fn init(allocator: std.mem.Allocator, dirname: []const u8) !Directory {
-        var dir = try std.fs.cwd().openDir(
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, dirname: []const u8) !Directory {
+        var dir = try std.Io.Dir.cwd().openDir(
+            io,
             dirname,
             .{ .iterate = true },
         );
-        errdefer dir.close();
+        errdefer dir.close(io);
 
-        var files = std.ArrayList([]const u8).init(allocator);
+        var files = std.array_list.Managed([]const u8).init(allocator);
         errdefer {
             for (files.items) |f| allocator.free(f);
             files.deinit();
         }
 
         var iterator = dir.iterate();
-        while (try iterator.next()) |entry| {
+        while (try iterator.next(io)) |entry| {
             if (entry.kind == .file and endsInMp3(entry.name)) {
                 const namecopy = try allocator.dupe(u8, entry.name);
                 try files.append(namecopy);
@@ -35,6 +37,7 @@ pub const Directory = struct {
 
         return Directory{
             .allocator = allocator,
+            .io = io,
             .dir = dir,
             .files = try files.toOwnedSlice(),
             .index = 0,
@@ -48,9 +51,9 @@ pub const Directory = struct {
         const filename = self.files[self.index];
         self.index += 1;
 
-        const fullFilename = try self.dir.realpathAlloc(self.allocator, filename);
+        const fullFilename = try self.dir.realPathFileAlloc(self.io, filename, self.allocator);
         defer self.allocator.free(fullFilename);
-        return try mp3f.Mp3File.init(self.allocator,fullFilename);
+        return try mp3f.Mp3File.init(self.allocator, self.io, fullFilename);
     }
 
     pub fn deinit(self: *Directory) void {
@@ -58,7 +61,7 @@ pub const Directory = struct {
             self.allocator.free(filename);
         }
         self.allocator.free(self.files);
-        self.dir.close();
+        self.dir.close(self.io);
     }
 
 };

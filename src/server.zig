@@ -2,42 +2,36 @@
 const std = @import("std");
 const scc = @import("protocol.zig");
 const Allocator = std.mem.Allocator;
-const posix = std.posix;
+const net = std.Io.net;
 
 pub const Server = struct {
     allocator: Allocator,
-    address: std.net.Address,
-    listener: posix.socket_t,
+    io: std.Io,
+    address: net.IpAddress,
+    server: net.Server,
 
-    pub fn init(allocator: Allocator, name: []const u8, port: u16) !Server {
-        const address = try std.net.Address.parseIp(name, port);
-        const tpe: u32 = posix.SOCK.STREAM;
-        const protocol = posix.IPPROTO.TCP;
-        const listener = try posix.socket(address.any.family, tpe, protocol);
+    pub fn init(allocator: Allocator, io: std.Io, name: []const u8, port: u16) !Server {
+        const address = try net.IpAddress.parse(name, port);
 
         return Server{
             .allocator = allocator,
+            .io = io,
             .address = address,
-            .listener = listener,
+            .server = undefined,
         };
     }
 
-    pub fn listen(self: Server) !void {
-        try posix.setsockopt(self.listener, posix.SOL.SOCKET, posix.SO.REUSEADDR, &std.mem.toBytes(@as(c_int, 1)));
-        try posix.bind(self.listener, &self.address.any, self.address.getOsSockLen());
-        try posix.listen(self.listener, 128);
+    pub fn listen(self: *Server) !void {
+        self.server = try self.address.listen(self.io, .{ .reuse_address = true });
         std.debug.print("Listening on port {}\n", .{self.address.getPort()});
     }
 
-    pub fn accept(self: Server) !scc.Protocol {
-        var client_address: std.net.Address = undefined;
-        var client_address_len: posix.socklen_t = @sizeOf(std.net.Address);
-        const socket = try posix.accept(self.listener, &client_address.any, &client_address_len, 0);
-
-        return try scc.Protocol.init(self.allocator, socket);
+    pub fn accept(self: *Server) !scc.Protocol {
+        const stream = try self.server.accept(self.io);
+        return try scc.Protocol.init(self.allocator, self.io, stream);
     }
 
-    pub fn close(self: Server) void {
-        posix.close(self.listener);
+    pub fn close(self: *Server) void {
+        self.server.deinit(self.io);
     }
 };
